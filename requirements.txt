@@ -1,0 +1,66 @@
+# ═══════════════════════════════════════════════════════════
+# Py App Maker — Requirements
+# ═══════════════════════════════════════════════════════════
+# Python >= 3.10 (به‌خاطر `X | None` syntax)
+# نصب:  pip install -r requirements.txt
+# ═══════════════════════════════════════════════════════════
+
+
+# ─── 🎨 UI (خود Py App Maker) ───
+customtkinter>=5.2.2
+tkinterdnd2>=0.4.2
+
+
+# ─── 🗄️ Database (اتصال به MySQL) ───
+mysql-connector-python>=9.0.0
+
+
+# ─── 🌐 HTTP (برای تست API و ...) ───
+requests>=2.32.0
+
+
+# ─── 🧩 Templating (برای تولید کد) ───
+Jinja2>=3.1.4
+
+
+# ─── ⚙️ Utils ───
+python-dotenv>=1.0.1
+
+
+# ═══════════════════════════════════════════════════════════
+# 🐍 پکیج‌های کد تولیدی (FastAPI API)
+# ═══════════════════════════════════════════════════════════
+# این‌ها رو همین الان نصب می‌کنیم تا بتونیم خروجی generator رو
+# مستقیم import و تست کنیم (قدم‌های ۵.۱ تا ۵.۷).
+# بعداً توی پروژه‌ی تولیدشده یه requirements.txt جدا ساخته می‌شه
+# که فقط شامل همین بخش پایینیه.
+# ═══════════════════════════════════════════════════════════
+
+# ─── ORM ───
+SQLAlchemy>=2.0.30
+
+# ─── Validation / Schemas ───
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+email-validator>=2.1.0
+
+# ─── Web Framework ───
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# ─── Auth (JWT + Password Hashing) ───
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.1.0
+
+# ─── MySQL Driver برای SQLAlchemy ───
+PyMySQL>=1.1.0
+cryptography>=42.0.0
+
+# ─── Bonus (اختیاری ولی پرکاربرد) ───
+# python-dateutil>=2.9.0
+
+
+
+# pip install -r requirements.txt

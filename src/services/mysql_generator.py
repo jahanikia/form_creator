@@ -1,0 +1,177 @@
+# src/services/mysql_generator.py
+"""
+MySQLGenerator — تبدیل CustomTable به SQL
+"""
+
+from src.models.custom_schema import CustomTable, CustomColumn
+
+
+DEFAULT_COLLATION = "utf8mb4_persian_ci"
+DEFAULT_CHARSET = "utf8mb4"
+DEFAULT_ENGINE = "InnoDB"
+
+
+class MySQLGenerator:
+    """تولیدکننده‌ی SQL برای MySQL"""
+
+    @staticmethod
+    def column_definition(col: CustomColumn) -> str:
+        parts = [f"`{col.name}`"]
+
+        dtype = col.data_type.upper()
+        if dtype == "ENUM":
+            enum_vals = "a,b"
+            if col.comment and col.comment.startswith("enum:"):
+                enum_vals = col.comment[5:]
+            values = ", ".join(f"'{v.strip()}'" for v in enum_vals.split(","))
+            parts.append(f"ENUM({values})")
+        else:
+            parts.append(dtype)
+
+        # NULL / NOT NULL
+        if col.allow_null:
+            parts.append("NULL")   # ⭐ صریح
+        else:
+            parts.append("NOT NULL")
+
+        # AUTO_INCREMENT
+        if col.is_auto_increment:
+            parts.append("AUTO_INCREMENT")
+
+        # DEFAULT — فقط اگه مقدار واقعی داره
+        if col.default_value and col.default_value.strip():
+            dv = col.default_value.strip()
+            if dv.upper() in ("NULL", "CURRENT_TIMESTAMP"):
+                parts.append(f"DEFAULT {dv.upper()}")
+            elif dv.replace(".", "").replace("-", "").isdigit():
+                parts.append(f"DEFAULT {dv}")
+            else:
+                parts.append(f"DEFAULT '{dv}'")
+        elif col.allow_null:
+            # ⭐ برای NULL، DEFAULT NULL صریح نمی‌ذاریم (MySQL خودش NULL می‌کنه)
+            pass
+
+        # UNIQUE
+        if col.is_unique and not col.is_primary:
+            parts.append("UNIQUE")
+
+        # COMMENT
+        if col.fa_name:
+            comment = col.fa_name
+            if col.comment and not col.comment.startswith("enum:"):
+                comment = f"{col.fa_name} — {col.comment}"
+            comment = comment.replace("'", "''")
+            parts.append(f"COMMENT '{comment}'")
+
+        return " ".join(parts)
+
+    @staticmethod
+    def create_table_sql(table: CustomTable,
+                         with_drop: bool = False,
+                         with_if_not_exists: bool = True) -> str:
+        lines = []
+
+        if with_drop:
+            lines.append(f"DROP TABLE IF EXISTS `{table.name}`;")
+            lines.append("")
+
+        not_exists = "IF NOT EXISTS " if with_if_not_exists else ""
+        lines.append(f"CREATE TABLE {not_exists}`{table.name}` (")
+
+        col_defs = []
+        for col in table.columns:
+            col_defs.append(f"  {MySQLGenerator.column_definition(col)}")
+
+        # PRIMARY KEY
+        pk_cols = [c for c in table.columns if c.is_primary]
+        if pk_cols:
+            if len(pk_cols) == 1:
+                col_defs.append(f"  PRIMARY KEY (`{pk_cols[0].name}`)")
+            else:
+                names = ", ".join(f"`{c.name}`" for c in pk_cols)
+                col_defs.append(f"  PRIMARY KEY ({names})")
+
+        # FOREIGN KEY — فقط اگه جدول مرجع توی همین لیست باشه
+        for col in table.columns:
+            if col.comment and col.comment.startswith("FK → "):
+                ref_table = col.comment.replace("FK → ", "").strip()
+                fk_name = f"fk_{table.name}_{col.name}"
+
+                # ⭐ نام FK کوتاه‌تر از 64 کاراکتر
+                if len(fk_name) > 64:
+                    fk_name = fk_name[:60] + "_fk"
+
+                on_delete = "ON DELETE SET NULL" if col.allow_null else "ON DELETE CASCADE"
+
+                col_defs.append(
+                    f"  CONSTRAINT `{fk_name}` "
+                    f"FOREIGN KEY (`{col.name}`) "
+                    f"REFERENCES `{ref_table}` (`id`) "
+                    f"{on_delete} ON UPDATE CASCADE"
+                )
+
+        lines.append(",\n".join(col_defs))
+
+        # ⭐ چک: MySQL 8 tables با collation utf8mb4_persian_ci نیاز به charset پیش‌فرض نداره
+        # ولی برای اطمینان، هم charset و هم collation رو صریح می‌دیم
+        lines.append(
+            f") ENGINE={DEFAULT_ENGINE} "
+            f"DEFAULT CHARSET={DEFAULT_CHARSET} "
+            f"COLLATE={DEFAULT_COLLATION}"
+        )
+
+        if table.fa_name or table.description:
+            comment_parts = []
+            if table.fa_name:
+                comment_parts.append(table.fa_name)
+            if table.description:
+                comment_parts.append(table.description)
+            comment = " — ".join(comment_parts).replace("'", "''")
+            lines[-1] += f" COMMENT='{comment}'"
+
+        lines.append(";")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def generate_all(tables: list[CustomTable],
+                     with_drop: bool = False,
+                     add_header: bool = True) -> str:
+        parts = []
+
+        if add_header:
+            parts.append("-- ═══════════════════════════════════════════════")
+            parts.append("-- Generated by Py App Maker")
+            parts.append("-- ═══════════════════════════════════════════════")
+            parts.append("")
+
+        # ⭐ ترتیب: اول جداولی که FK ندارن، بعد بقیه
+        # چون FK به users/id و roles/id اشاره می‌کنه
+        priority = {"users": 1, "roles": 2, "permissions": 3}
+        sorted_tables = sorted(
+            tables,
+            key=lambda t: (
+                priority.get(t.name, 100),
+                not t.is_default,
+                t.order_index,
+                t.id or 0,
+            ),
+        )
+
+        for t in sorted_tables:
+            parts.append(f"-- ─── جدول: {t.fa_name or t.name} ───")
+            parts.append(MySQLGenerator.create_table_sql(t, with_drop=with_drop))
+            parts.append("")
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def generate_drop_sql(tables: list[CustomTable]) -> str:
+        sorted_tables = sorted(
+            tables,
+            key=lambda t: (t.is_default, -t.order_index, -(t.id or 0)),
+        )
+        parts = ["-- DROP TABLES", ""]
+        for t in sorted_tables:
+            parts.append(f"DROP TABLE IF EXISTS `{t.name}`;")
+        return "\n".join(parts)
